@@ -1,3 +1,6 @@
+
+DAY = day04
+
 run:
 	# shellで 
 	@make build
@@ -19,7 +22,7 @@ init:
 link:
 	# 配置場所により適宜pathを変える
 	rm ~/develop/edk2/MikanLoaderPkg
-	ln -s ~/develop/mikanos-sunjin/day04/MikanLoaderPkg ~/develop/edk2/
+	ln -s ~/develop/mikanos-sunjin/$(DAY)/MikanLoaderPkg ~/develop/edk2/
 
 source_edk2:
 	cd ~/develop/edk2/ && source edksetup.sh
@@ -35,7 +38,7 @@ edit_conf_target:
 	./Edit_Conf_target.sh
 
 build:
-	cd ~/develop/mikanos-sunjin/day03/kernel && make build
+	cd ~/develop/mikanos-sunjin/$(DAY)/kernel && make
 	cd ~/develop/edk2 && build
 
 
@@ -47,7 +50,7 @@ mount:
 	hdiutil attach -mountpoint mnt sunjin.img
 	mkdir -p mnt/EFI/BOOT
 	cp ~/develop/edk2/Build/MikanLoaderX64/DEBUG_CLANGPDB/X64/Loader.efi mnt/EFI/BOOT/BOOTX64.EFI
-	cp ~/develop/mikanos-sunjin/day03/kernel/kernel.elf mnt/
+	cp ~/develop/mikanos-sunjin/$(DAY)/kernel/kernel.elf mnt/
 	sleep 3
 	hdiutil detach mnt
 

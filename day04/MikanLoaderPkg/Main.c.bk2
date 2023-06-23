@@ -3,11 +3,14 @@
 #include  <Library/UefiBootServicesTableLib.h>
 #include  <Library/PrintLib.h>
 #include  <Library/MemoryAllocationLib.h>
+#include  <Library/BaseMemoryLib.h>
 #include  <Protocol/LoadedImage.h>
 #include  <Protocol/SimpleFileSystem.h>
 #include  <Protocol/DiskIo2.h>
 #include  <Protocol/BlockIo.h>
 #include  <Guid/FileInfo.h>
+#include  "frame_buffer_config.hpp"
+#include  "elf.hpp"
 
 struct MemoryMap {
   UINTN buffer_size;
@@ -53,17 +56,19 @@ const CHAR16* GetMemoryTypeUnicode(EFI_MEMORY_TYPE type) {
     default: return L"InvalidMemoryType";
   }
 }
-// #@@range_end(get_memory_type)
 
-// #@@range_begin(save_memory_map)
 EFI_STATUS SaveMemoryMap(struct MemoryMap* map, EFI_FILE_PROTOCOL* file) {
+  EFI_STATUS status;
   CHAR8 buf[256];
   UINTN len;
 
   CHAR8* header =
     "Index, Type, Type(name), PhysicalStart, NumberOfPages, Attribute\n";
   len = AsciiStrLen(header);
-  file->Write(file, &len, header);
+  status = file->Write(file, &len, header);
+  if (EFI_ERROR(status)) {
+    return status;
+  }
 
   Print(L"map->buffer = %08lx, map->map_size = %08lx\n",
       map->buffer, map->map_size);
@@ -80,62 +85,78 @@ EFI_STATUS SaveMemoryMap(struct MemoryMap* map, EFI_FILE_PROTOCOL* file) {
         i, desc->Type, GetMemoryTypeUnicode(desc->Type),
         desc->PhysicalStart, desc->NumberOfPages,
         desc->Attribute & 0xffffflu);
-    file->Write(file, &len, buf);
+    status = file->Write(file, &len, buf);
+    if (EFI_ERROR(status)) {
+      return status;
+    }
   }
 
   return EFI_SUCCESS;
 }
 
 EFI_STATUS OpenRootDir(EFI_HANDLE image_handle, EFI_FILE_PROTOCOL** root) {
+  EFI_STATUS status;
   EFI_LOADED_IMAGE_PROTOCOL* loaded_image;
   EFI_SIMPLE_FILE_SYSTEM_PROTOCOL* fs;
 
-  gBS->OpenProtocol(
+  status = gBS->OpenProtocol(
       image_handle,
       &gEfiLoadedImageProtocolGuid,
       (VOID**)&loaded_image,
       image_handle,
       NULL,
       EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL);
+  if (EFI_ERROR(status)) {
+    return status;
+  }
 
-  gBS->OpenProtocol(
+  status = gBS->OpenProtocol(
       loaded_image->DeviceHandle,
       &gEfiSimpleFileSystemProtocolGuid,
       (VOID**)&fs,
       image_handle,
       NULL,
       EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL);
+  if (EFI_ERROR(status)) {
+    return status;
+  }
 
-  fs->OpenVolume(fs, root);
-
-  return EFI_SUCCESS;
+  return fs->OpenVolume(fs, root);
 }
 
-// Graphics Output Protocolを取得する
-EFI_STATUS OpenGOP(EFI_HANDLE image_handle, EFI_GRAPHICS_OUTPUT_PROTOCOL** gop) {
+EFI_STATUS OpenGOP(EFI_HANDLE image_handle,
+                   EFI_GRAPHICS_OUTPUT_PROTOCOL** gop) {
+  EFI_STATUS status;
   UINTN num_gop_handles = 0;
   EFI_HANDLE* gop_handles = NULL;
-  gBS->LocateHandleBuffer(
-    ByProtocol,
-    &gEfiGraphicsOutputProtocolGuid,
-    NULL,
-    &num_gop_handles,
-    &gop_handles);
 
-  gBS->OpenProtocol(
-    gop_handles[0],
-    &gEfiGraphicsOutputProtocolGuid,
-    (VOID**)gop,
-    image_handle,
-    NULL,
-    EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL);
+  status = gBS->LocateHandleBuffer(
+      ByProtocol,
+      &gEfiGraphicsOutputProtocolGuid,
+      NULL,
+      &num_gop_handles,
+      &gop_handles);
+  if (EFI_ERROR(status)) {
+    return status;
+  }
+
+  status = gBS->OpenProtocol(
+      gop_handles[0],
+      &gEfiGraphicsOutputProtocolGuid,
+      (VOID**)gop,
+      image_handle,
+      NULL,
+      EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL);
+  if (EFI_ERROR(status)) {
+    return status;
+  }
 
   FreePool(gop_handles);
 
   return EFI_SUCCESS;
 }
 
-const CHAR16 *GetPixelFormatUnicode(EFI_GRAPHICS_PIXEL_FORMAT fmt) {
+const CHAR16* GetPixelFormatUnicode(EFI_GRAPHICS_PIXEL_FORMAT fmt) {
   switch (fmt) {
     case PixelRedGreenBlueReserved8BitPerColor:
       return L"PixelRedGreenBlueReserved8BitPerColor";
@@ -143,6 +164,8 @@ const CHAR16 *GetPixelFormatUnicode(EFI_GRAPHICS_PIXEL_FORMAT fmt) {
       return L"PixelBlueGreenRedReserved8BitPerColor";
     case PixelBitMask:
       return L"PixelBitMask";
+    case PixelBltOnly:
+      return L"PixelBltOnly";
     case PixelFormatMax:
       return L"PixelFormatMax";
     default:
@@ -154,13 +177,41 @@ void Halt(void) {
   while (1) __asm__("hlt");
 }
 
+// #@@range_begin(calc_addr_func)
+void CalcLoadAddressRange(Elf64_Ehdr* ehdr, UINT64* first, UINT64* last) {
+  Elf64_Phdr* phdr = (Elf64_Phdr*)((UINT64)ehdr + ehdr->e_phoff);
+  *first = MAX_UINT64;
+  *last = 0;
+  for (Elf64_Half i = 0; i < ehdr->e_phnum; ++i) {
+    if (phdr[i].p_type != PT_LOAD) continue;
+    *first = MIN(*first, phdr[i].p_vaddr);
+    *last = MAX(*last, phdr[i].p_vaddr + phdr[i].p_memsz);
+  }
+}
+// #@@range_end(calc_addr_func)
+
+// #@@range_begin(copy_segm_func)
+void CopyLoadSegments(Elf64_Ehdr* ehdr) {
+  Elf64_Phdr* phdr = (Elf64_Phdr*)((UINT64)ehdr + ehdr->e_phoff);
+  for (Elf64_Half i = 0; i < ehdr->e_phnum; ++i) {
+    if (phdr[i].p_type != PT_LOAD) continue;
+
+    UINT64 segm_in_file = (UINT64)ehdr + phdr[i].p_offset;
+    CopyMem((VOID*)phdr[i].p_vaddr, (VOID*)segm_in_file, phdr[i].p_filesz);
+
+    UINTN remain_bytes = phdr[i].p_memsz - phdr[i].p_filesz;
+    SetMem((VOID*)(phdr[i].p_vaddr + phdr[i].p_filesz), remain_bytes, 0);
+  }
+}
+// #@@range_end(copy_segm_func)
+
 EFI_STATUS EFIAPI UefiMain(
     EFI_HANDLE image_handle,
     EFI_SYSTEM_TABLE* system_table) {
-
   EFI_STATUS status;
 
-  // memmapの内容をファイルに書き込む
+  Print(L"Hello, Mikan World!\n");
+
   CHAR8 memmap_buf[4096 * 4];
   struct MemoryMap memmap = {sizeof(memmap_buf), memmap_buf, 0, 0, 0, 0};
   status = GetMemoryMap(&memmap);
@@ -182,7 +233,7 @@ EFI_STATUS EFIAPI UefiMain(
       EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE, 0);
   if (EFI_ERROR(status)) {
     Print(L"failed to open file '\\memmap': %r\n", status);
-    Print(L"Ignored.");
+    Print(L"Ignored.\n");
   } else {
     status = SaveMemoryMap(&memmap, memmap_file);
     if (EFI_ERROR(status)) {
@@ -196,75 +247,89 @@ EFI_STATUS EFIAPI UefiMain(
     }
   }
 
-  // gop
-  EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
+  EFI_GRAPHICS_OUTPUT_PROTOCOL* gop;
   status = OpenGOP(image_handle, &gop);
   if (EFI_ERROR(status)) {
     Print(L"failed to open GOP: %r\n", status);
     Halt();
   }
 
-  Print(L"Resolution: %ux%u, Pixcel Format: %s, %u pixels/line\n",
-    gop->Mode->Info->HorizontalResolution,
-    gop->Mode->Info->VerticalResolution,
-    GetPixelFormatUnicode(gop->Mode->Info->PixelFormat),
-    gop->Mode->Info->PixelsPerScanLine);
-
+  Print(L"Resolution: %ux%u, Pixel Format: %s, %u pixels/line\n",
+      gop->Mode->Info->HorizontalResolution,
+      gop->Mode->Info->VerticalResolution,
+      GetPixelFormatUnicode(gop->Mode->Info->PixelFormat),
+      gop->Mode->Info->PixelsPerScanLine);
   Print(L"Frame Buffer: 0x%0lx - 0x%0lx, Size: %lu bytes\n",
-    gop->Mode->FrameBufferBase,
-    gop->Mode->FrameBufferBase + gop->Mode->FrameBufferSize,
-    gop->Mode->FrameBufferSize);
+      gop->Mode->FrameBufferBase,
+      gop->Mode->FrameBufferBase + gop->Mode->FrameBufferSize,
+      gop->Mode->FrameBufferSize);
 
-  // 白く塗りつぶす
-  UINT8 *frame_buffer = (UINT8*)gop->Mode->FrameBufferBase;
-  for (UINTN i = 0; i < gop->Mode->FrameBufferSize; i++) {
+  UINT8* frame_buffer = (UINT8*)gop->Mode->FrameBufferBase;
+  for (UINTN i = 0; i < gop->Mode->FrameBufferSize; ++i) {
     frame_buffer[i] = 255;
   }
 
-  // kernel.elfを呼び出す
-  // kernel fileを読み込む
-  EFI_FILE_PROTOCOL *kernel_file;
+  EFI_FILE_PROTOCOL* kernel_file;
   status = root_dir->Open(
-    root_dir, &kernel_file, L"\\kernel.elf",
-    EFI_FILE_MODE_READ, 0);
+      root_dir, &kernel_file, L"\\kernel.elf",
+      EFI_FILE_MODE_READ, 0);
   if (EFI_ERROR(status)) {
     Print(L"failed to open file '\\kernel.elf': %r\n", status);
     Halt();
   }
 
-  // 開いたファイルの全体を読み込むためのメモリを確保する
-  UINTN file_info_size = sizeof(EFI_FILE_INFO) + sizeof(CHAR16) * 12; // CHAR16 * 12分多めに確保する
+  UINTN file_info_size = sizeof(EFI_FILE_INFO) + sizeof(CHAR16) * 12;
   UINT8 file_info_buffer[file_info_size];
   status = kernel_file->GetInfo(
-    kernel_file, &gEfiFileInfoGuid,
-    &file_info_size, file_info_buffer);
+      kernel_file, &gEfiFileInfoGuid,
+      &file_info_size, file_info_buffer);
   if (EFI_ERROR(status)) {
     Print(L"failed to get file information: %r\n", status);
     Halt();
   }
-  
 
-  EFI_FILE_INFO *file_info = (EFI_FILE_INFO*)file_info_buffer;
+  // #@@range_begin(read_kernel)
+  EFI_FILE_INFO* file_info = (EFI_FILE_INFO*)file_info_buffer;
   UINTN kernel_file_size = file_info->FileSize;
 
-  EFI_PHYSICAL_ADDRESS kernel_base_addr = 0x100000;
-  status = gBS->AllocatePages(
-    AllocateAddress, EfiLoaderData,
-    (kernel_file_size + 0xfff) / 0x1000, &kernel_base_addr);
+  VOID* kernel_buffer;
+  status = gBS->AllocatePool(EfiLoaderData, kernel_file_size, &kernel_buffer);
+  if (EFI_ERROR(status)) {
+    Print(L"failed to allocate pool: %r\n", status);
+    Halt();
+  }
+  status = kernel_file->Read(kernel_file, &kernel_file_size, kernel_buffer);
+  if (EFI_ERROR(status)) {
+    Print(L"error: %r", status);
+    Halt();
+  }
+  // #@@range_end(read_kernel)
+
+  // #@@range_begin(alloc_pages)
+  Elf64_Ehdr* kernel_ehdr = (Elf64_Ehdr*)kernel_buffer;
+  UINT64 kernel_first_addr, kernel_last_addr;
+  CalcLoadAddressRange(kernel_ehdr, &kernel_first_addr, &kernel_last_addr);
+
+  UINTN num_pages = (kernel_last_addr - kernel_first_addr + 0xfff) / 0x1000;
+  status = gBS->AllocatePages(AllocateAddress, EfiLoaderData,
+                              num_pages, &kernel_first_addr);
   if (EFI_ERROR(status)) {
     Print(L"failed to allocate pages: %r\n", status);
     Halt();
   }
+  // #@@range_end(alloc_pages)
 
-  status = kernel_file->Read(kernel_file, &kernel_file_size, (VOID*)kernel_base_addr);
+  // #@@range_begin(copy_segments)
+  CopyLoadSegments(kernel_ehdr);
+  Print(L"Kernel: 0x%0lx - 0x%0lx\n", kernel_first_addr, kernel_last_addr);
+
+  status = gBS->FreePool(kernel_buffer);
   if (EFI_ERROR(status)) {
-    Print(L"kernel error: %r\n", status);
+    Print(L"failed to free pool: %r\n", status);
     Halt();
   }
+  // #@@range_end(copy_segments)
 
-  Print(L"Kernel: 0x%0lx (%lu bytes)\n", kernel_base_addr, kernel_file_size);
-
-  // 今まで動いていたBoot Serviceを停止する
   status = gBS->ExitBootServices(image_handle, memmap.map_key);
   if (EFI_ERROR(status)) {
     status = GetMemoryMap(&memmap);
@@ -274,25 +339,42 @@ EFI_STATUS EFIAPI UefiMain(
     }
     status = gBS->ExitBootServices(image_handle, memmap.map_key);
     if (EFI_ERROR(status)) {
-      Print(L"Could not exit bool service: %r\n", status);
+      Print(L"Could not exit boot service: %r\n", status);
       Halt();
     }
   }
 
-  // カーネルを起動する
-  // macだとentrypointのアドレスがちょい違うけど、いけてるんやろというやつhttps://zenn.dev/karaage0703/scraps/b2705131673377
-  UINT64 entry_addr = *(UINT64*)(kernel_base_addr + 24);
+  // #@@range_begin(get_entry_point)
+  UINT64 entry_addr = *(UINT64*)(kernel_first_addr + 24);
+  // #@@range_end(get_entry_point)
 
-  // typedef void EntryPointType(UINT64, UINT64);
-  // https://qiita.com/yamoridon/items/4905765cc6e4f320c9b5#34-%E3%83%96%E3%83%BC%E3%83%88%E3%83%AD%E3%83%BC%E3%83%80%E3%81%8B%E3%82%89%E3%83%94%E3%82%AF%E3%82%BB%E3%83%AB%E3%82%92%E6%8F%8F%E3%81%8F%E3%81%AE%E8%A3%9C%E8%B6%B3
-  typedef void __attribute__((sysv_abi)) EntryPointType(UINT64, UINT64);
+  struct FrameBufferConfig config = {
+    (UINT8*)gop->Mode->FrameBufferBase,
+    gop->Mode->Info->PixelsPerScanLine,
+    gop->Mode->Info->HorizontalResolution,
+    gop->Mode->Info->VerticalResolution,
+    0
+  };
+  switch (gop->Mode->Info->PixelFormat) {
+    case PixelRedGreenBlueReserved8BitPerColor:
+      config.pixel_format = kPixelRGBResv8BitPerColor;
+      break;
+    case PixelBlueGreenRedReserved8BitPerColor:
+      config.pixel_format = kPixelBGRResv8BitPerColor;
+      break;
+    default:
+      Print(L"Unimplemented pixel format: %d\n", gop->Mode->Info->PixelFormat);
+      Halt();
+  }
 
-  EntryPointType *entry_point = (EntryPointType*)entry_addr;
-  // entry_point();
-  entry_point(gop->Mode->FrameBufferBase, gop->Mode->FrameBufferSize);
+//   typedef void EntryPointType(const struct FrameBufferConfig*);
+    typedef void __attribute__((sysv_abi)) EntryPointType(const struct FrameBufferConfig*);
+
+  EntryPointType* entry_point = (EntryPointType*)entry_addr;
+  entry_point(&config);
 
   Print(L"All done\n");
 
-  Halt();
+  while (1);
   return EFI_SUCCESS;
 }
