@@ -141,7 +141,7 @@ namespace pci {
         return ReadData();
     }
 
-    bool IsSIngleFunctionDevice(uint8_t header_type) {
+    bool IsSingleFunctionDevice(uint8_t header_type) {
         return (header_type & 0x80u) == 0;
     }
 
