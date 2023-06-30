@@ -1,5 +1,5 @@
 TARGET = kernel.elf
-OBJS = main.o graphics.o font.o common.o hankaku.o newlib_support.o console.o
+OBJS = main.o graphics.o font.o common.o hankaku.o newlib_support.o console.o asmfunc.o pci.o
 DEPENDS = $(join $(dir $(OBJS)),$(addprefix .,$(notdir $(OBJS:.o=.d))))
 
 BASEDIR = $${HOME}/develop/mikanos-sunjin/kernel/x86_64-elf
@@ -11,6 +11,8 @@ CPPFLAGS = -I$(BASEDIR)/include/c++/v1 -I$(BASEDIR)/include -I$(BASEDIR)/include
 CPPFLAGS += -I$(EDK2DIR)/MdePkg/Include -I$(EDK2DIR)/MdePkg/Include/X64
 CPPFLAGS += -nostdlibinc -D__ELF__ -D_LDBL_EQ_DBL -D_GNU_SOURCE -D_POSIX_TIMERS
 CPPFLAGS += -DEFIAPI='__attribute__((ms_abi))'
+
+CFLAGS += -O2 -Wall -g --target=x86_64-elf -ffreestanding -mno-red-zone
 
 LDFLAGS = -L$(BASEDIR)/lib
 LDFLAGS += --entry KernelMain -z norelro --image-base 0x100000 --static -z separate-code
@@ -24,7 +26,6 @@ clean:
 	rm -rf *.bin
 
 kernel.elf: $(OBJS) Makefile 
-	# ld.lld $(LDFLAGS) -o kernel.elf $(OBJS)
 	ld.lld $(LDFLAGS) -o kernel.elf $(OBJS) -lc
 
 %.o: %.cpp Makefile
@@ -36,6 +37,19 @@ kernel.elf: $(OBJS) Makefile
 	# sed --in-place 's|$(notdir $(OBJ))|$(OBJ)|' $@
 	# Mac
 	sed -I '' -e 's|$(notdir $(OBJ))|$(OBJ)|' $@
+
+# TODO cのcompileもかく
+
+%.o: %.c Makefile
+	clang $(CPPFLAGS) $(CFLAGS) -c $<
+
+.%.d: %.c
+	clang $(CPPFLAGS) $(CFLAGS) -MM $< > $@
+	$(eval OBJ = $(<:.c=.o))
+	sed -I '' -e 's|$(notdir $(OBJ))|$(OBJ)|' $@
+
+%.o: %.asm Makefile
+	nasm -f elf64 -o $@ $<
 
 .%.d: %.bin
 	touch $@

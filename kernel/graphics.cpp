@@ -1,16 +1,16 @@
 #include "graphics.hpp"
-#include "common.hpp"
+// #include "common.hpp"
 
-PixelWriter *NewPixelWriter(const FrameBufferConfig &config, char *buf) {
-    switch (config.pixel_format) {
-        case kPixelRGBResv8BitPerColor:
-            return new(buf)RGBResv8BitPerColorPixelWriter(config);
-        case kPixelBGRResv8BitPerColor:
-            return new(buf)BGRResv8BitPerColorPixelWriter(config);
-        default:
-            Halt();
-    }
-}
+// PixelWriter *NewPixelWriter(const FrameBufferConfig &config, char *buf) {
+//     switch (config.pixel_format) {
+//         case kPixelRGBResv8BitPerColor:
+//             return new(buf)RGBResv8BitPerColorPixelWriter(config);
+//         case kPixelBGRResv8BitPerColor:
+//             return new(buf)BGRResv8BitPerColorPixelWriter(config);
+//         default:
+//             Halt();
+//     }
+// }
 
 void RGBResv8BitPerColorPixelWriter::Write(int x, int y, const PixelColor& pixel_color) {
     uint8_t *pixel_draw_point = PixelAt(x, y);

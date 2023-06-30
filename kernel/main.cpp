@@ -5,9 +5,22 @@
 #include "frame_buffer_config.hpp"
 #include "graphics.hpp"
 #include "font.hpp"
-#include "common.hpp"
 #include "console.hpp"
 #include "mouse.hpp"
+#include "pci.hpp"
+#include "common.hpp"
+
+PixelWriter *NewPixelWriter(const FrameBufferConfig &config, char *buf) {
+    switch (config.pixel_format) {
+        case kPixelRGBResv8BitPerColor:
+            return new(buf)RGBResv8BitPerColorPixelWriter(config);
+        case kPixelBGRResv8BitPerColor:
+            return new(buf)BGRResv8BitPerColorPixelWriter(config);
+        default:
+            Halt();
+    }
+}
+
 
 // 問題になったら修正する
 char console_buf[sizeof(Console)];
@@ -28,6 +41,8 @@ int printk(const char *format, ...) {
     console->PutString(s);
     return result;
 }
+
+
 
 extern "C" void KernelMain(const FrameBufferConfig &frame_buffer_config) {
     // RGBもGBRも同じsizeなのでこれで問題ない
@@ -54,6 +69,19 @@ extern "C" void KernelMain(const FrameBufferConfig &frame_buffer_config) {
                 pixel_writer->Write(200 + dx, 100 + dy, {255, 255, 255});
             }
         }
+    }
+
+    // ShowDevice
+    Error err = pci::ScanAllBus();
+    printk("ScanAllBus: %s\n", err.Name());
+
+    for (int i = 0; i < pci::num_device; i++) {
+        const pci::Device& dev = pci::devices[i];
+        uint16_t vendor_id = pci::ReadVendorId(dev.bus, dev.device, dev.function);
+        uint32_t class_code = pci::ReadClassCode(dev.bus, dev.device, dev.function);
+        printk("%d.%d.%d: vend %04x, class %08x, head %02x\n",
+            dev.bus, dev.device, dev.function,
+            vendor_id, class_code, dev.header_type);
     }
 
     Halt();
