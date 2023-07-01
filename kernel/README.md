@@ -6,3 +6,7 @@ tar -zxvf x86_64-elf.tar.gz
 ```
 
 amoridon/items/4905765cc6e4f320c9b5#52-%E5%88%86%E5%89%B2%E3%82%B3%E3%83%B3%E3%83%91%E3%82%A4%E3%83%AB%E3%81%AE%E8%A3%9C%E8%B6%B3
+
+## 6章で詰みそう  
+
+https://zenn.dev/maeharin/scraps/f6b6ee457c3726  
