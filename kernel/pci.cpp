@@ -28,14 +28,14 @@ namespace {
     }
 
     // devices[num_device]に情報を書き込み、num_deviceをincrement
-    Error AddDevice(uint8_t bus, uint8_t device, uint8_t function, uint8_t header_type) {
+    Error AddDevice(const Device &device) {
         if (num_device == devices.size()) {
-            return Error::kFull;
+            return MAKE_ERROR(Error::kFull);
         }
 
-        devices[num_device] = Device{bus, device, function, header_type};
+        devices[num_device] = device;
         num_device++;
-        return Error::kSuccess;
+        return SUCCESS();
     }
 
     Error ScanBus(uint8_t bus);
@@ -44,13 +44,19 @@ namespace {
     // もしPCI-PCIブリッジならセカンダリバスに対しScanBusを実行する
     Error ScanFunction(uint8_t bus, uint8_t device, uint8_t function) {
         uint8_t header_type = ReadHeaderType(bus, device, function);
-        if (Error err = AddDevice(bus, device, function, header_type)) {
+        ClassCode class_code = ReadClassCode(bus, device, function);
+        Device dev = {
+            .bus = bus,
+            .device = device,
+            .function = function,
+            .header_type = header_type,
+            .class_code = class_code,
+        };
+        if (Error err = AddDevice(dev)) {
             return err;
         }
-
-        uint32_t class_code = ReadClassCode(bus, device, function);
-        uint8_t base = (class_code >> 24) & 0xffu;
-        uint8_t sub = (class_code >> 16) & 0xffu;
+        uint8_t base = class_code.base;
+        uint8_t sub = class_code.sub;
 
         if (base == 0x06u && sub == 0x04u) {
             // standard PCI-PCI bridge
@@ -59,7 +65,7 @@ namespace {
             return ScanBus(secondary_bus);
         }
 
-        return Error::kSuccess;
+        return SUCCESS();
     }
 
     Error ScanDevice(uint8_t bus, uint8_t device) {
@@ -71,7 +77,7 @@ namespace {
 
         // それで終わりならOK
         if (IsSingleFunctionDevice(ReadHeaderType(bus, device, 0))) {
-            return Error::kSuccess;
+            return SUCCESS();
         }
 
         // 複数ある場合は、こっちを実行
@@ -83,7 +89,7 @@ namespace {
                 return err;
             }
         }
-        return Error::kSuccess;
+        return SUCCESS();
     }
 
     // 指定のデバイス番号の各ファンクションをスキャンする
@@ -99,7 +105,7 @@ namespace {
                 return err;
             }
         }
-        return Error::kSuccess;
+        return SUCCESS();
     }
 }
 
@@ -131,9 +137,14 @@ namespace pci {
         return (ReadData() >> 16) & 0xffu;
     }
 
-    uint32_t ReadClassCode(uint8_t bus, uint8_t device, uint8_t function) {
+    ClassCode ReadClassCode(uint8_t bus, uint8_t device, uint8_t function) {
         WriteAddress(MakeAddress(bus, device, function, 0x08));
-        return ReadData();
+        uint32_t reg = ReadData();
+        ClassCode class_code;
+        class_code.base = (reg >> 24) & 0xffu;
+        class_code.sub = (reg >> 16) & 0xffu;
+        class_code.interface = (reg >> 8) & 0xffu;
+        return class_code;
     }
 
     uint32_t ReadBusNumbers(uint8_t bus, uint8_t device, uint8_t function) {
@@ -161,6 +172,6 @@ namespace pci {
                 return err;
             }
         }
-        return Error::kSuccess;
+        return SUCCESS();
     }
 }

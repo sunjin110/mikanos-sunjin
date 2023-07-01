@@ -1,5 +1,5 @@
 TARGET = kernel.elf
-OBJS = main.o graphics.o font.o common.o hankaku.o newlib_support.o console.o asmfunc.o pci.o
+OBJS = main.o graphics.o font.o common.o hankaku.o newlib_support.o console.o asmfunc.o pci.o logger.o
 DEPENDS = $(join $(dir $(OBJS)),$(addprefix .,$(notdir $(OBJS:.o=.d))))
 
 BASEDIR = $${HOME}/develop/mikanos-sunjin/kernel/x86_64-elf
