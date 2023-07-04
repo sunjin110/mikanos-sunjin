@@ -1,5 +1,11 @@
 #!/bin/bash
 
+if [ "$(uname)" == 'Darwin' ]; then
+OS='Mac'
+elif [ "$(expr substr $(uname -s) 1 5)" == 'Linux' ]; then
+OS='Linux'
+endif
+
 ACTIVE_PLATFORM="MikanLoaderPkg/MikanLoaderPkg.dsc"
 TARGET="DEBUG"
 TARGET_ARCH="X64"
@@ -17,7 +23,8 @@ update_or_add_line() {
     local value=$2
 
     if grep -q "^${key} " ${CONFIG_FILE_PATH}; then
-        sed -i '' "s#^${key}[[:space:]]*=[[:space:]]*.*#${key} = ${value}#" ${CONFIG_FILE_PATH}
+        # sed -i '' "s#^${key}[[:space:]]*=[[:space:]]*.*#${key} = ${value}#" ${CONFIG_FILE_PATH}
+        sed "s#^${key}[[:space:]]*=[[:space:]]*.*#${key} = ${value}#" ${CONFIG_FILE_PATH}
     else
         echo "${key} = ${value}" >> ${CONFIG_FILE_PATH}
     fi
