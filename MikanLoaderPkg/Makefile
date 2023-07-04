@@ -30,7 +30,7 @@ edk2_submodule_init:
 
 edk2_base_tool_build:
 	# edk2/BaseTools/Source/C/Common/Decompress.c の #define UINT8_MAX 0xffの前に #undef UINT8_MAXを記述
-	cd ~/develop/edk2 && make -C /Users/yun_sunjin/develop/edk2/BaseTools/Source/C
+	cd ~/develop/edk2 && make -C ~/develop/edk2/BaseTools/Source/C
 
 edit_conf_target:
 	./Edit_Conf_target.sh
@@ -45,12 +45,21 @@ format:
 	mkfs.fat -n 'SUNJIN OS' -s 2 -f 2 -R 32 -F 32 sunjin.img
 
 mount:
-	hdiutil attach -mountpoint mnt sunjin.img
-	mkdir -p mnt/EFI/BOOT
-	cp ~/develop/edk2/Build/MikanLoaderX64/DEBUG_CLANGPDB/X64/Loader.efi mnt/EFI/BOOT/BOOTX64.EFI
-	cp ~/develop/mikanos-sunjin/kernel/kernel.elf mnt/
+	# TODO ここをどうにかする
+	# hdiutil attach -mountpoint mnt sunjin.img
+	# mkdir -p mnt/EFI/BOOT
+	# cp ~/develop/edk2/Build/MikanLoaderX64/DEBUG_CLANGPDB/X64/Loader.efi mnt/EFI/BOOT/BOOTX64.EFI
+	# cp ~/develop/mikanos-sunjin/kernel/kernel.elf mnt/
+	# sleep 3
+	# hdiutil detach mnt # for mac
+	# # unmout mnt
+
+	sudo mount -o loop sunjin.img mnt/
+	sudo mkdir -p mnt/EFI/BOOT
+	sudo cp ~/develop/edk2/Build/MikanLoaderX64/DEBUG_CLANGPDB/X64/Loader.efi mnt/EFI/BOOT/BOOTX64.EFI
+	sudo cp ~/develop/mikanos-sunjin/kernel/kernel.elf mnt/
 	sleep 3
-	hdiutil detach mnt
+	sudo umount mnt/
 
 run-qemu:
 	qemu-system-x86_64 -drive if=pflash,file=OVMF_CODE.fd -drive if=pflash,file=OVMF_VARS.fd -hda sunjin.img -monitor stdio
