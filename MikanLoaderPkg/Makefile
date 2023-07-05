@@ -56,7 +56,7 @@ mount:
 
 	sudo mount -o loop sunjin.img mnt/
 	sudo mkdir -p mnt/EFI/BOOT
-	sudo cp ~/develop/edk2/Build/MikanLoaderX64/DEBUG_CLANGPDB/X64/Loader.efi mnt/EFI/BOOT/BOOTX64.EFI
+	sudo cp ~/develop/edk2/Build/MikanLoaderX64/DEBUG_CLANG38/X64/Loader.efi mnt/EFI/BOOT/BOOTX64.EFI
 	sudo cp ~/develop/mikanos-sunjin/kernel/kernel.elf mnt/
 	sleep 3
 	sudo umount mnt/

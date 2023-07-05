@@ -11,14 +11,16 @@ CPPFLAGS = -I$(BASEDIR)/include/c++/v1 -I$(BASEDIR)/include -I$(BASEDIR)/include
 CPPFLAGS += -I$(EDK2DIR)/MdePkg/Include -I$(EDK2DIR)/MdePkg/Include/X64
 CPPFLAGS += -nostdlibinc -D__ELF__ -D_LDBL_EQ_DBL -D_GNU_SOURCE -D_POSIX_TIMERS
 
-ifeq ($(shell uname),Darwin)
-CPPFLAGS += -DEFIAPI='__attribute__((ms_abi))'
-endif
+# ifeq ($(shell uname),Darwin)
+# CPPFLAGS += -DEFIAPI='__attribute__((ms_abi))'
+# endif
 
 CFLAGS += -O2 -Wall -g --target=x86_64-elf -ffreestanding -mno-red-zone
 
 LDFLAGS = -L$(BASEDIR)/lib
 LDFLAGS += --entry KernelMain -z norelro --image-base 0x100000 --static -z separate-code
+
+# LDFLAGS += --entry KernelMain -z norelro --image-base 0x100000 --static
 
 .PHONY: all
 all: $(TARGET)
